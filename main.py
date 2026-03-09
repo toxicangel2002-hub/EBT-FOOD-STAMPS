@@ -46,8 +46,6 @@ guild_id INTEGER
 conn.commit()
 
 
-# CATEGORY TOGGLE UI
-
 class CategoryToggle(discord.ui.View):
 
     def __init__(self, guild_id):
@@ -94,8 +92,6 @@ class CategoryToggle(discord.ui.View):
         await self.toggle(interaction, "building")
 
 
-# PLAYER APPLICATION
-
 class ApplyEBT(discord.ui.View):
 
     def __init__(self):
@@ -141,8 +137,6 @@ class ApplyEBT(discord.ui.View):
         await review_channel.send(embed=embed, view=view)
 
 
-# STAFF APPROVAL
-
 class ReviewApplication(discord.ui.View):
 
     def __init__(self, user_id):
@@ -176,8 +170,6 @@ class ReviewApplication(discord.ui.View):
 
         await interaction.response.send_message("Application denied.")
 
-
-# BUSINESS LICENSE
 
 class ApplyBusiness(discord.ui.View):
 
@@ -240,8 +232,6 @@ class BusinessReview(discord.ui.View):
         await interaction.response.send_message("Application denied.")
 
 
-# SETUP COMMAND
-
 @bot.tree.command()
 async def setup_ebt(
 interaction: discord.Interaction,
@@ -291,7 +281,23 @@ questions: str
     await interaction.response.send_message("EBT system setup complete.")
 
 
-# CATEGORY COMMAND
+@bot.tree.command()
+@app_commands.checks.has_permissions(administrator=True)
+async def reset_ebt(interaction: discord.Interaction):
+
+    guild_id = interaction.guild.id
+
+    cursor.execute("DELETE FROM config WHERE guild_id=?", (guild_id,))
+    cursor.execute("DELETE FROM cards WHERE guild_id=?", (guild_id,))
+    cursor.execute("DELETE FROM licenses WHERE guild_id=?", (guild_id,))
+
+    conn.commit()
+
+    await interaction.response.send_message(
+        "⚠️ EBT system fully reset. Run `/setup_ebt` again.",
+        ephemeral=True
+    )
+
 
 @bot.tree.command()
 async def ebt_categories(interaction: discord.Interaction):
@@ -303,8 +309,6 @@ async def ebt_categories(interaction: discord.Interaction):
         view=view
     )
 
-
-# BALANCE
 
 @bot.tree.command()
 async def balance(interaction: discord.Interaction):
@@ -320,8 +324,6 @@ async def balance(interaction: discord.Interaction):
 
     await interaction.response.send_message(f"Balance: ${data[0]}")
 
-
-# PAY
 
 @bot.tree.command()
 async def pay(
@@ -370,8 +372,6 @@ category: str
 
     await interaction.response.send_message(embed=receipt)
 
-
-# MONTHLY RELOAD
 
 @bot.tree.command()
 async def reload_ebt(interaction: discord.Interaction):
