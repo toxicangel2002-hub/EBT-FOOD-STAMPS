@@ -13,7 +13,10 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-keep_alive()
+@bot.event
+async def on_ready():
+    print("EBT BOT ONLINE")
+    monthly_reload.start()
 
 # DATABASE
 conn = sqlite3.connect("ebt.db")
@@ -253,4 +256,5 @@ async def monthly_reload():
 
     conn.commit()
 
+keep_alive()
 bot.run(TOKEN)
