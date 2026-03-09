@@ -24,7 +24,12 @@ business_app_channel INTEGER,
 business_review_channel INTEGER,
 licensed_role INTEGER,
 fraud_channel INTEGER,
-questions TEXT
+questions TEXT,
+food INTEGER,
+tools INTEGER,
+alcohol INTEGER,
+medical INTEGER,
+building INTEGER
 )""")
 
 cursor.execute("""CREATE TABLE IF NOT EXISTS cards(
@@ -38,15 +43,61 @@ user_id INTEGER,
 guild_id INTEGER
 )""")
 
-cursor.execute("""CREATE TABLE IF NOT EXISTS blocked_items(
-guild_id INTEGER,
-item TEXT
-)""")
-
 conn.commit()
 
 
-class ApplyEBTButton(discord.ui.View):
+# CATEGORY TOGGLE UI
+
+class CategoryToggle(discord.ui.View):
+
+    def __init__(self, guild_id):
+        super().__init__(timeout=None)
+        self.guild_id = guild_id
+
+    async def toggle(self, interaction, column):
+
+        cursor.execute(f"SELECT {column} FROM config WHERE guild_id=?",
+                       (self.guild_id,))
+        value = cursor.fetchone()[0]
+
+        new_value = 0 if value == 1 else 1
+
+        cursor.execute(f"UPDATE config SET {column}=? WHERE guild_id=?",
+                       (new_value, self.guild_id))
+        conn.commit()
+
+        status = "ENABLED" if new_value == 1 else "DISABLED"
+
+        await interaction.response.send_message(
+            f"{column.capitalize()} purchases now **{status}**",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="Food", style=discord.ButtonStyle.green)
+    async def food(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.toggle(interaction, "food")
+
+    @discord.ui.button(label="Tools", style=discord.ButtonStyle.gray)
+    async def tools(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.toggle(interaction, "tools")
+
+    @discord.ui.button(label="Alcohol", style=discord.ButtonStyle.red)
+    async def alcohol(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.toggle(interaction, "alcohol")
+
+    @discord.ui.button(label="Medical", style=discord.ButtonStyle.blurple)
+    async def medical(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.toggle(interaction, "medical")
+
+    @discord.ui.button(label="Building", style=discord.ButtonStyle.gray)
+    async def building(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.toggle(interaction, "building")
+
+
+# PLAYER APPLICATION
+
+class ApplyEBT(discord.ui.View):
+
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -58,35 +109,28 @@ class ApplyEBTButton(discord.ui.View):
             (interaction.guild.id,))
         data = cursor.fetchone()
 
-        if not data:
-            await interaction.response.send_message("EBT system not configured.", ephemeral=True)
-            return
-
         questions = data[0].split("|")
         review_channel = interaction.guild.get_channel(data[1])
 
         await interaction.response.send_message(
-            "Check your DMs to complete the EBT application.",
+            "Check DMs for the application.",
             ephemeral=True
         )
 
         answers = []
 
-        try:
-            for q in questions:
-                await interaction.user.send(q)
+        for q in questions:
 
-                def check(m):
-                    return m.author == interaction.user and isinstance(m.channel, discord.DMChannel)
+            await interaction.user.send(q)
 
-                msg = await bot.wait_for("message", check=check, timeout=300)
-                answers.append(msg.content)
+            def check(m):
+                return m.author == interaction.user and isinstance(m.channel, discord.DMChannel)
 
-        except:
-            await interaction.user.send("Application timed out.")
-            return
+            msg = await bot.wait_for("message", check=check)
+            answers.append(msg.content)
 
-        embed = discord.Embed(title="New EBT Application", color=0x00ff00)
+        embed = discord.Embed(title="New EBT Application", color=0x2ecc71)
+
         embed.add_field(name="Applicant", value=interaction.user.mention)
 
         for i, q in enumerate(questions):
@@ -97,6 +141,8 @@ class ApplyEBTButton(discord.ui.View):
         await review_channel.send(embed=embed, view=view)
 
 
+# STAFF APPROVAL
+
 class ReviewApplication(discord.ui.View):
 
     def __init__(self, user_id):
@@ -106,30 +152,34 @@ class ReviewApplication(discord.ui.View):
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.green)
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
 
+        await interaction.response.defer()
+
         cursor.execute(
             "SELECT starting_balance, recipient_role FROM config WHERE guild_id=?",
             (interaction.guild.id,))
         data = cursor.fetchone()
 
-        balance = data[0]
-        role = interaction.guild.get_role(data[1])
         member = interaction.guild.get_member(self.user_id)
+        role = interaction.guild.get_role(data[1])
 
         cursor.execute(
             "INSERT INTO cards VALUES(?,?,?)",
-            (self.user_id, interaction.guild.id, balance))
+            (self.user_id, interaction.guild.id, data[0]))
         conn.commit()
 
         await member.add_roles(role)
 
-        await interaction.response.send_message("Application approved.")
+        await interaction.followup.send("EBT application approved.")
 
     @discord.ui.button(label="Deny", style=discord.ButtonStyle.red)
     async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
+
         await interaction.response.send_message("Application denied.")
 
 
-class ApplyBusinessButton(discord.ui.View):
+# BUSINESS LICENSE
+
+class ApplyBusiness(discord.ui.View):
 
     def __init__(self):
         super().__init__(timeout=None)
@@ -146,8 +196,7 @@ class ApplyBusinessButton(discord.ui.View):
 
         embed = discord.Embed(
             title="Business License Application",
-            description=f"{interaction.user.mention} applied for an EBT license",
-            color=0x3498db
+            description=f"{interaction.user.mention} applied for EBT license"
         )
 
         view = BusinessReview(interaction.user.id)
@@ -166,6 +215,8 @@ class BusinessReview(discord.ui.View):
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.green)
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
 
+        await interaction.response.defer()
+
         cursor.execute(
             "SELECT licensed_role FROM config WHERE guild_id=?",
             (interaction.guild.id,))
@@ -181,12 +232,15 @@ class BusinessReview(discord.ui.View):
             (self.user_id, interaction.guild.id))
         conn.commit()
 
-        await interaction.response.send_message("Business approved.")
+        await interaction.followup.send("Business approved.")
 
     @discord.ui.button(label="Deny", style=discord.ButtonStyle.red)
     async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
+
         await interaction.response.send_message("Application denied.")
 
+
+# SETUP COMMAND
 
 @bot.tree.command()
 async def setup_ebt(
@@ -205,7 +259,7 @@ questions: str
 ):
 
     cursor.execute(
-        "INSERT OR REPLACE INTO config VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        """INSERT OR REPLACE INTO config VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,1,0,1,1)""",
         (
             interaction.guild.id,
             monthly_amount,
@@ -225,17 +279,32 @@ questions: str
     conn.commit()
 
     await player_application_channel.send(
-        "Click below to apply for EBT",
-        view=ApplyEBTButton()
+        "Apply for EBT below:",
+        view=ApplyEBT()
     )
 
     await business_application_channel.send(
-        "Click below to apply for an EBT business license",
-        view=ApplyBusinessButton()
+        "Apply for an EBT Business License:",
+        view=ApplyBusiness()
     )
 
-    await interaction.response.send_message("EBT system configured.")
+    await interaction.response.send_message("EBT system setup complete.")
 
+
+# CATEGORY COMMAND
+
+@bot.tree.command()
+async def ebt_categories(interaction: discord.Interaction):
+
+    view = CategoryToggle(interaction.guild.id)
+
+    await interaction.response.send_message(
+        "Toggle which item categories EBT can purchase:",
+        view=view
+    )
+
+
+# BALANCE
 
 @bot.tree.command()
 async def balance(interaction: discord.Interaction):
@@ -249,36 +318,29 @@ async def balance(interaction: discord.Interaction):
         await interaction.response.send_message("You do not have an EBT card.")
         return
 
-    await interaction.response.send_message(f"Your balance is ${data[0]}")
+    await interaction.response.send_message(f"Balance: ${data[0]}")
 
+
+# PAY
 
 @bot.tree.command()
 async def pay(
 interaction: discord.Interaction,
 business: discord.Member,
 amount: int,
-item: str
+item: str,
+category: str
 ):
 
     cursor.execute(
-        "SELECT item FROM blocked_items WHERE guild_id=?",
+        f"SELECT {category.lower()} FROM config WHERE guild_id=?",
         (interaction.guild.id,))
-    blocked = [x[0].lower() for x in cursor.fetchall()]
+    allowed = cursor.fetchone()[0]
 
-    if item.lower() in blocked:
-
-        cursor.execute(
-            "SELECT fraud_channel FROM config WHERE guild_id=?",
-            (interaction.guild.id,))
-        channel_id = cursor.fetchone()[0]
-
-        channel = interaction.guild.get_channel(channel_id)
-
-        await channel.send(
-            f"EBT FRAUD ATTEMPT\nUser: {interaction.user.mention}\nItem: {item}"
+    if allowed == 0:
+        await interaction.response.send_message(
+            "EBT cannot be used for that category."
         )
-
-        await interaction.response.send_message("This item is not allowed.")
         return
 
     cursor.execute(
@@ -297,30 +359,19 @@ item: str
         (new_balance, interaction.user.id, interaction.guild.id))
     conn.commit()
 
-    receipt = discord.Embed(
-        title="EBT Transaction Receipt",
-        color=0x2ecc71
-    )
+    receipt = discord.Embed(title="EBT Receipt", color=0x2ecc71)
 
     receipt.add_field(name="Buyer", value=interaction.user.mention)
     receipt.add_field(name="Business", value=business.mention)
     receipt.add_field(name="Item", value=item)
+    receipt.add_field(name="Category", value=category)
     receipt.add_field(name="Amount", value=f"${amount}")
     receipt.add_field(name="Remaining Balance", value=f"${new_balance}")
 
     await interaction.response.send_message(embed=receipt)
 
 
-@bot.tree.command()
-async def blockitem(interaction: discord.Interaction, item: str):
-
-    cursor.execute(
-        "INSERT INTO blocked_items VALUES(?,?)",
-        (interaction.guild.id, item.lower()))
-    conn.commit()
-
-    await interaction.response.send_message(f"{item} blocked from EBT.")
-
+# MONTHLY RELOAD
 
 @bot.tree.command()
 async def reload_ebt(interaction: discord.Interaction):
@@ -346,21 +397,10 @@ async def reload_ebt(interaction: discord.Interaction):
     await interaction.response.send_message("All EBT balances reloaded.")
 
 
-@bot.tree.command()
-async def end_license(interaction: discord.Interaction, business: discord.Member):
-
-    cursor.execute(
-        "DELETE FROM licenses WHERE user_id=? AND guild_id=?",
-        (business.id, interaction.guild.id))
-    conn.commit()
-
-    await interaction.response.send_message("Business license removed.")
-
-
 @bot.event
 async def on_ready():
     await bot.tree.sync()
-    print(f"Logged in as {bot.user}")
+    print("Bot Ready")
 
 
 bot.run(os.getenv("TOKEN"))
