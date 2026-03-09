@@ -445,4 +445,4 @@ async def end_license(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.send_message("EBT license removed.")
 
 keep_alive()
-bot.run(TOKEN
+bot.run(TOKEN)
